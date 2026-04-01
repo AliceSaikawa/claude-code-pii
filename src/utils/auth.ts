@@ -547,7 +547,7 @@ async function _executeApiKeyHelper(
     const hasTrust = checkHasTrustDialogAccepted()
     if (!hasTrust && !isNonInteractiveSession) {
       const error = new Error(
-        `Security: apiKeyHelper executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
+        `Security: apiKeyHelper executed before workspace trust is confirmed. If you see this message, post in ${'https://github.com/anthropics/claude-code/issues'}.`,
       )
       logAntError('apiKeyHelper invoked before trust check', error)
       logEvent('tengu_apiKeyHelper_missing_trust11', {})
@@ -622,7 +622,7 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     const hasTrust = checkHasTrustDialogAccepted()
     if (!hasTrust && !getIsNonInteractiveSession()) {
       const error = new Error(
-        `Security: awsAuthRefresh executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
+        `Security: awsAuthRefresh executed before workspace trust is confirmed. If you see this message, post in ${'https://github.com/anthropics/claude-code/issues'}.`,
       )
       logAntError('awsAuthRefresh invoked before trust check', error)
       logEvent('tengu_awsAuthRefresh_missing_trust', {})
@@ -719,7 +719,7 @@ async function getAwsCredsFromCredentialExport(): Promise<{
     const hasTrust = checkHasTrustDialogAccepted()
     if (!hasTrust && !getIsNonInteractiveSession()) {
       const error = new Error(
-        `Security: awsCredentialExport executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
+        `Security: awsCredentialExport executed before workspace trust is confirmed. If you see this message, post in ${'https://github.com/anthropics/claude-code/issues'}.`,
       )
       logAntError('awsCredentialExport invoked before trust check', error)
       logEvent('tengu_awsCredentialExport_missing_trust', {})
@@ -886,7 +886,7 @@ async function runGcpAuthRefresh(): Promise<boolean> {
     const hasTrust = checkHasTrustDialogAccepted()
     if (!hasTrust && !getIsNonInteractiveSession()) {
       const error = new Error(
-        `Security: gcpAuthRefresh executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
+        `Security: gcpAuthRefresh executed before workspace trust is confirmed. If you see this message, post in ${'https://github.com/anthropics/claude-code/issues'}.`,
       )
       logAntError('gcpAuthRefresh invoked before trust check', error)
       logEvent('tengu_gcpAuthRefresh_missing_trust', {})

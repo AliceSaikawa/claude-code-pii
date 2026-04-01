@@ -245,7 +245,7 @@ export function getLogoDisplayData(): {
   billingType: string
   agentName: string | undefined
 } {
-  const version = process.env.DEMO_VERSION ?? MACRO.VERSION
+  const version = process.env.DEMO_VERSION ?? '2.1.88'
   const serverUrl = getDirectConnectServerUrl()
   const displayPath = process.env.DEMO_VERSION
     ? '/code/claude'
@@ -312,7 +312,7 @@ export function formatModelAndBilling(
 export function getRecentReleaseNotesSync(maxItems: number): string[] {
   // For ants, use bundled changelog
   if (process.env.USER_TYPE === 'ant') {
-    const changelog = MACRO.VERSION_CHANGELOG
+    const changelog = ''
     if (changelog) {
       const commits = changelog.trim().split('\n').filter(Boolean)
       return commits.slice(0, maxItems)

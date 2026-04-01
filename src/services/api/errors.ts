@@ -685,7 +685,7 @@ export function getAssistantMessageFromError(
     }
 
     if (process.env.USER_TYPE === 'ant') {
-      const baseMessage = `API Error: 400 ${error.message}\n\nRun /share and post the JSON file to ${MACRO.FEEDBACK_CHANNEL}.`
+      const baseMessage = `API Error: 400 ${error.message}\n\nRun /share and post the JSON file to ${'https://github.com/anthropics/claude-code/issues'}.`
       const rewindInstruction = getIsNonInteractiveSession()
         ? ''
         : ' Then, use /rewind to recover the conversation.'
@@ -760,8 +760,8 @@ export function getAssistantMessageFromError(
     const orgId = getOauthAccountInfo()?.organizationUuid
     const baseMsg = `[ANT-ONLY] Your org isn't gated into the \`${model}\` model. Either run \`claude\` with \`ANTHROPIC_MODEL=${getDefaultMainLoopModelSetting()}\``
     const msg = orgId
-      ? `${baseMsg} or share your orgId (${orgId}) in ${MACRO.FEEDBACK_CHANNEL} for help getting access.`
-      : `${baseMsg} or reach out in ${MACRO.FEEDBACK_CHANNEL} for help getting access.`
+      ? `${baseMsg} or share your orgId (${orgId}) in ${'https://github.com/anthropics/claude-code/issues'} for help getting access.`
+      : `${baseMsg} or reach out in ${'https://github.com/anthropics/claude-code/issues'} for help getting access.`
 
     return createAssistantAPIErrorMessage({
       content: msg,

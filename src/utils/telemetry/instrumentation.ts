@@ -402,7 +402,7 @@ async function initializeBetaTracing(
   // Initialize event logger
   const eventLogger = logs.getLogger(
     'com.anthropic.claude_code.events',
-    MACRO.VERSION,
+    '2.1.88',
   )
   setEventLogger(eventLogger)
 
@@ -472,7 +472,7 @@ export async function initializeTelemetry() {
   const platform = getPlatform()
   const baseAttributes: Record<string, string> = {
     [ATTR_SERVICE_NAME]: 'claude-code',
-    [ATTR_SERVICE_VERSION]: MACRO.VERSION,
+    [ATTR_SERVICE_VERSION]: '2.1.88',
   }
 
   // Add WSL-specific attributes if running on WSL
@@ -560,7 +560,7 @@ export async function initializeTelemetry() {
     }
     registerCleanup(shutdownTelemetry)
 
-    return meterProvider.getMeter('com.anthropic.claude_code', MACRO.VERSION)
+    return meterProvider.getMeter('com.anthropic.claude_code', '2.1.88')
   }
 
   const meterProvider = new MeterProvider({
@@ -601,7 +601,7 @@ export async function initializeTelemetry() {
       // Initialize event logger
       const eventLogger = logs.getLogger(
         'com.anthropic.claude_code.events',
-        MACRO.VERSION,
+        '2.1.88',
       )
       setEventLogger(eventLogger)
       logForDebugging('[3P telemetry] Event logger set successfully')
@@ -697,7 +697,7 @@ Current timeout: ${timeoutMs}ms
   // Always register shutdown (internal metrics are always enabled)
   registerCleanup(shutdownTelemetry)
 
-  return meterProvider.getMeter('com.anthropic.claude_code', MACRO.VERSION)
+  return meterProvider.getMeter('com.anthropic.claude_code', '2.1.88')
 }
 
 /**

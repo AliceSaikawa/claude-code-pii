@@ -119,7 +119,7 @@ function appendToLog(path: string, message: object): void {
     cwd: getFsImplementation().cwd(),
     userType: process.env.USER_TYPE,
     sessionId: getSessionId(),
-    version: MACRO.VERSION,
+    version: '2.1.88',
   }
 
   getLogWriter(path).write(messageWithTimestamp)

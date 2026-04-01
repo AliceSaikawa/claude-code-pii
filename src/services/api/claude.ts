@@ -106,7 +106,15 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
   ? (require('../../utils/permissions/autoModeState.js') as typeof import('../../utils/permissions/autoModeState.js'))
   : null
 
-import { feature } from 'bun:bundle'
+import { feature } from '../../stubs/bun-bundle.js'
+import {
+  isPIIFilterEnabled,
+  filterMessages as piiFilterMessages,
+  filterSystemPrompt as piiFilterSystemPrompt,
+  restoreText as piiRestoreText,
+  createStreamRestorer,
+  type StreamRestorer,
+} from '../pii/index.js'
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
   APIConnectionTimeoutError,
@@ -1314,6 +1322,11 @@ async function* queryModel(
     API_MAX_MEDIA_PER_REQUEST,
   )
 
+  // === PII Filter: outbound messages ===
+  if (isPIIFilterEnabled()) {
+    messagesForAPI = await piiFilterMessages(messagesForAPI)
+  }
+
   // Instrumentation: Track message count after normalization
   logEvent('tengu_api_after_normalize', {
     postNormalizedMessageCount: messagesForAPI.length,
@@ -1367,6 +1380,11 @@ async function* queryModel(
       ...(injectChromeHere ? [CHROME_TOOL_SEARCH_INSTRUCTIONS] : []),
     ].filter(Boolean),
   )
+
+  // === PII Filter: system prompt ===
+  if (isPIIFilterEnabled()) {
+    systemPrompt = asSystemPrompt(await piiFilterSystemPrompt(systemPrompt))
+  }
 
   // Prepend system prompt block for easy API identification
   logAPIPrefix(systemPrompt)
@@ -1769,6 +1787,8 @@ async function* queryModel(
   let fallbackMessage: AssistantMessage | undefined
   let maxOutputTokens = 0
   let responseHeaders: globalThis.Headers | undefined = undefined
+  // === PII Filter: stream restorer instance for this request ===
+  const piiStreamRestorer = isPIIFilterEnabled() ? createStreamRestorer() : null
   let research: unknown = undefined
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
@@ -2122,7 +2142,9 @@ async function* queryModel(
                     })
                     throw new Error('Content block is not a text block')
                   }
-                  contentBlock.text += delta.text
+                  contentBlock.text += piiStreamRestorer
+                    ? piiStreamRestorer.process(delta.text)
+                    : delta.text
                   break
                 case 'signature_delta':
                   if (
@@ -2205,6 +2227,14 @@ async function* queryModel(
               ...(process.env.USER_TYPE === 'ant' &&
                 research !== undefined && { research }),
               ...(advisorModel && { advisorModel }),
+            }
+            // === PII Filter: restore placeholders in assistant response ===
+            if (piiStreamRestorer) {
+              for (const block of m.message.content) {
+                if ('text' in block && typeof block.text === 'string') {
+                  block.text = piiRestoreText(block.text + piiStreamRestorer.flush())
+                }
+              }
             }
             newMessages.push(m)
             yield m
@@ -2588,6 +2618,14 @@ async function* queryModel(
         ...(advisorModel && {
           advisorModel,
         }),
+      }
+      // === PII Filter: restore placeholders in non-streaming response ===
+      if (isPIIFilterEnabled()) {
+        for (const block of m.message.content) {
+          if ('text' in block && typeof block.text === 'string') {
+            block.text = piiRestoreText(block.text)
+          }
+        }
       }
       newMessages.push(m)
       fallbackMessage = m

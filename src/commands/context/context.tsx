@@ -1,4 +1,4 @@
-import { feature } from 'bun:bundle';
+import { feature } from '../../stubs/bun-bundle.js';
 import * as React from 'react';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { ContextVisualization } from '../../components/ContextVisualization.js';

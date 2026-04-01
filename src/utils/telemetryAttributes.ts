@@ -38,7 +38,7 @@ export function getTelemetryAttributes(): Attributes {
     attributes['session.id'] = sessionId
   }
   if (shouldIncludeAttribute('OTEL_METRICS_INCLUDE_VERSION')) {
-    attributes['app.version'] = MACRO.VERSION
+    attributes['app.version'] = '2.1.88'
   }
 
   // Only include OAuth account data when actively using OAuth authentication

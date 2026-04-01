@@ -1,0 +1,2 @@
+// stub
+export default undefined

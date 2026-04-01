@@ -3,9 +3,9 @@ import type { Command, LocalCommandCall } from '../types/command.js'
 const call: LocalCommandCall = async () => {
   return {
     type: 'text',
-    value: MACRO.BUILD_TIME
-      ? `${MACRO.VERSION} (built ${MACRO.BUILD_TIME})`
-      : MACRO.VERSION,
+    value: '2026-04-01T06:41:40.426Z'
+      ? `${'2.1.88'} (built ${'2026-04-01T06:41:40.426Z'})`
+      : '2.1.88',
   }
 }
 
