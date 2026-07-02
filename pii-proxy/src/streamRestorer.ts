@@ -1,7 +1,8 @@
 import type { MappingTable } from './mappingTable.js'
 
 const PLACEHOLDER_PATTERN = /^\[[A-Z_]+_\d+\]$/
-const MAX_PENDING = 25
+// Longest possible placeholder: [POSTAL_CODE_9999] = 18 chars; add buffer for unknowns
+const MAX_PENDING = 50
 
 class TextDeltaRestorer {
   private pending = ''

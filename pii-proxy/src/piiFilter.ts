@@ -132,6 +132,12 @@ export class PIIFilter {
   private async filterText(text: string, useOllama: boolean): Promise<string> {
     if (!text.trim()) return text
 
+    const allowlistSet = new Set(this.config.allowlist)
+    const registerWithAllowlist = (original: string, category: PIICategory): string => {
+      if (allowlistSet.has(original)) return original
+      return this.mappingTable.register(original, category)
+    }
+
     let filtered = text
 
     const dictionaryMatches = detectDictionaryPII(
@@ -139,10 +145,10 @@ export class PIIFilter {
       this.config.categories,
       this.config.dictionary,
     )
-    filtered = applyReplacements(filtered, dictionaryMatches, this.register.bind(this))
+    filtered = applyReplacements(filtered, dictionaryMatches, registerWithAllowlist)
 
     const regexMatches = detectRegexPII(filtered, this.config.categories, this.config.customPatterns)
-    filtered = applyReplacements(filtered, regexMatches, this.register.bind(this))
+    filtered = applyReplacements(filtered, regexMatches, registerWithAllowlist)
 
     if (this.config.ollamaEnabled && useOllama) {
       const ollamaMatches = await detectOllamaPII(
@@ -154,7 +160,7 @@ export class PIIFilter {
 
       if (ollamaMatches.length > 0) {
         const sorted = [...ollamaMatches].sort((a, b) => b.start - a.start)
-        filtered = applyReplacements(filtered, sorted, this.register.bind(this))
+        filtered = applyReplacements(filtered, sorted, registerWithAllowlist)
       }
     }
 

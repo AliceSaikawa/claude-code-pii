@@ -24,13 +24,13 @@ export class MappingTable {
   }
 
   replaceAllPlaceholders(input: string): string {
-    let output = input
-    for (const [placeholder, original] of this.placeholderToOriginal.entries()) {
-      while (output.includes(placeholder)) {
-        output = output.replace(placeholder, original)
-      }
-    }
-    return output
+    if (this.placeholderToOriginal.size === 0) return input
+
+    const escaped = [...this.placeholderToOriginal.keys()].map((k) =>
+      k.replace(/[[\]]/g, '\\$&'),
+    )
+    const pattern = new RegExp(escaped.join('|'), 'g')
+    return input.replace(pattern, (match) => this.placeholderToOriginal.get(match) ?? match)
   }
 
   clear(): void {

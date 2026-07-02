@@ -190,7 +190,9 @@ const server = createServer(async (req, res) => {
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'application/json' })
     }
-    res.end(JSON.stringify({ error: 'Upstream proxy error' }))
+    if (!res.writableEnded) {
+      res.end(JSON.stringify({ error: 'Upstream proxy error' }))
+    }
   }
 })
 

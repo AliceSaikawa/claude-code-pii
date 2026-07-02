@@ -43,11 +43,10 @@ class MappingTable {
   }
 
   replaceAllPlaceholders(input) {
-    let output = input
-    for (const [ph, orig] of this.#ph2orig.entries()) {
-      while (output.includes(ph)) output = output.replace(ph, orig)
-    }
-    return output
+    if (this.#ph2orig.size === 0) return input
+    const escaped = [...this.#ph2orig.keys()].map(k => k.replace(/[[\]]/g, '\\$&'))
+    const pattern = new RegExp(escaped.join('|'), 'g')
+    return input.replace(pattern, m => this.#ph2orig.get(m) ?? m)
   }
 
   clear() { this.#orig2ph.clear(); this.#ph2orig.clear(); this.#counters.clear() }
@@ -70,11 +69,16 @@ const PATTERNS = [
   { category: 'EMAIL', pattern: /[\w.+-]+@[\w-]+\.[\w.-]+/g },
   { category: 'CREDIT_CARD', pattern: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, validate: luhnCheck },
   { category: 'MY_NUMBER', pattern: /\b\d{4}[-\s]\d{4}[-\s]\d{4}\b/g },
-  { category: 'PHONE', pattern: /(?:\+81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}\b/g },
+  { category: 'PHONE', pattern: /(?:\+81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}\b/g, validate: m => m.replace(/[-\s]/g, '').length >= 10 },
   { category: 'PHONE', pattern: /\+\d{1,3}[-\s]\d{1,14}(?:[-\s]\d{1,14}){0,4}\b/g },
   { category: 'ADDRESS', pattern: /(?:北海道|東京都|(?:大阪|京都)府|.{2,3}県).{1,8}(?:市|区|町|村|郡).{1,20}?(?:\d{1,4}[-ー]\d{1,4}(?:[-ー]\d{1,4})?|[一二三四五六七八九十百]+丁目)/g },
   { category: 'URL_USER', pattern: /https?:\/\/[^\s/@]+:[^\s/@]+@[^\s/]+/g },
   { category: 'NAME', pattern: /(?:Author|Committer):\s+(.+?)\s+<[^>]+>/g, captureGroup: 1 },
+  { category: 'SSN', pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
+  { category: 'IP_ADDRESS', pattern: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+  { category: 'IP_ADDRESS', pattern: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g },
+  { category: 'POSTAL_CODE', pattern: /〒\d{3}-\d{4}/g },
+  { category: 'POSTAL_CODE', pattern: /\b\d{3}-\d{4}(?=\s*(?:$|[^\d]))/g, validate: m => !/^\d{3}-\d{2}-\d{4}$/.test(m) },
 ]
 
 function detectDictionary(text, categories, dictionary) {
@@ -113,12 +117,18 @@ function detectRegex(text, categories) {
 }
 
 function applyReplacements(text, matches, register) {
+  const sorted = [...matches].sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start))
+  const winners = []
+  let lastEnd = -1
+  for (const match of sorted) {
+    if (match.start >= lastEnd) {
+      winners.push(match)
+      lastEnd = match.end
+    }
+  }
+  winners.sort((a, b) => b.start - a.start)
   let result = text
-  const used = new Set()
-  for (const match of matches) {
-    const key = `${match.start}:${match.end}`
-    if (used.has(key)) continue
-    used.add(key)
+  for (const match of winners) {
     const ph = register(match.text, match.category)
     result = result.slice(0, match.start) + ph + result.slice(match.end)
   }
@@ -127,11 +137,13 @@ function applyReplacements(text, matches, register) {
 
 function filterText(text, config, mapping) {
   if (!text.trim()) return text
+  const allowlistSet = new Set(config.allowlist ?? [])
+  const reg = (o, c) => allowlistSet.has(o) ? o : mapping.register(o, c)
   let filtered = text
   const dictMatches = detectDictionary(filtered, config.categories, config.dictionary ?? [])
-  filtered = applyReplacements(filtered, dictMatches, (o, c) => mapping.register(o, c))
+  filtered = applyReplacements(filtered, dictMatches, reg)
   const regexMatches = detectRegex(filtered, config.categories)
-  filtered = applyReplacements(filtered, regexMatches, (o, c) => mapping.register(o, c))
+  filtered = applyReplacements(filtered, regexMatches, reg)
   return filtered
 }
 
@@ -155,6 +167,11 @@ const TEST_PII = {
   dictName: '山田太郎',
   dictOrg: 'テスト株式会社',
   dictSchool: 'テスト大学',
+  ssn: '123-45-6789',
+  ipv4: '192.168.1.100',
+  ipv6: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
+  postalCode: '〒100-0001',
+  postalCodePlain: '100-0001',
 }
 
 const TEST_MESSAGE = `私は${TEST_PII.dictName}です。${TEST_PII.dictOrg}に所属しています。` +
@@ -197,6 +214,8 @@ function testFilterON() {
   const mapping2 = new MappingTable()
   const ccFiltered = filterText(`Card: ${TEST_PII.creditCard}`, config, mapping2)
   console.log('Credit card filtered:', ccFiltered)
+  assert.ok(ccFiltered.includes('[CREDIT_CARD_'), `Credit card should be masked as CREDIT_CARD, got: ${ccFiltered}`)
+  assert.ok(!ccFiltered.includes('[PHONE_'), `Credit card should NOT be masked as PHONE, got: ${ccFiltered}`)
 
   const mapping3 = new MappingTable()
   const mnFiltered = filterText(`番号: ${TEST_PII.myNumber}`, config, mapping3)
@@ -208,6 +227,80 @@ function testFilterON() {
   console.log('Address filtered:', addrFiltered)
 
   console.log('Scenario 1 PASSED')
+}
+
+// ============================================================
+// Bug regression tests
+// ============================================================
+function testBugRegressions() {
+  console.log('\n=== Bug Regressions ===')
+  const config = { ...loadConfig(), dictionary: [], ollamaEnabled: false, allowlist: [] }
+
+  // #16: PHONE duplicate — same number matched by both patterns should produce single placeholder
+  {
+    const mapping = new MappingTable()
+    const text = '+81-90-1111-2222'
+    const filtered = filterText(text, { ...config, categories: ['PHONE'] }, mapping)
+    const placeholderCount = (filtered.match(/\[PHONE_\d+\]/g) ?? []).length
+    assert.equal(placeholderCount, 1, `#16: phone should produce 1 placeholder, got ${placeholderCount} in "${filtered}"`)
+    console.log('#16 PHONE overlap: OK')
+  }
+
+  // #18: replaceAllPlaceholders O(n) — large input with many placeholders
+  {
+    const mapping = new MappingTable()
+    const items = Array.from({ length: 200 }, (_, i) => `user${i}@example.com`)
+    const text = items.join(' ')
+    const filtered = filterText(text, { ...config, categories: ['EMAIL'] }, mapping)
+    const t0 = Date.now()
+    mapping.replaceAllPlaceholders(filtered)
+    const elapsed = Date.now() - t0
+    assert.ok(elapsed < 500, `#18: replaceAllPlaceholders took ${elapsed}ms (should be <500ms for 200 items)`)
+    console.log(`#18 replaceAllPlaceholders O(n): ${elapsed}ms OK`)
+  }
+
+  // #26: Allowlist — allowlisted value should not be masked
+  {
+    const mapping = new MappingTable()
+    const allowlisted = 'public@example.com'
+    const private_ = 'private@example.com'
+    const text = `Send to ${allowlisted} and ${private_}`
+    const filtered = filterText(text, { ...config, categories: ['EMAIL'], allowlist: [allowlisted] }, mapping)
+    assert.ok(filtered.includes(allowlisted), `#26: allowlisted email should remain unmasked`)
+    assert.ok(!filtered.includes(private_), `#26: non-allowlisted email should be masked`)
+    console.log('#26 Allowlist: OK')
+  }
+
+  // New patterns: SSN
+  {
+    const mapping = new MappingTable()
+    const filtered = filterText(`SSN: ${TEST_PII.ssn}`, { ...config, categories: ['SSN'] }, mapping)
+    assert.ok(!filtered.includes(TEST_PII.ssn), 'SSN should be masked')
+    assert.ok(filtered.includes('[SSN_'), 'Should contain SSN placeholder')
+    const restored = mapping.replaceAllPlaceholders(filtered)
+    assert.ok(restored.includes(TEST_PII.ssn), 'SSN should be restored')
+    console.log('#27 SSN: OK')
+  }
+
+  // New patterns: IPv4
+  {
+    const mapping = new MappingTable()
+    const filtered = filterText(`Server: ${TEST_PII.ipv4}`, { ...config, categories: ['IP_ADDRESS'] }, mapping)
+    assert.ok(!filtered.includes(TEST_PII.ipv4), 'IPv4 should be masked')
+    assert.ok(filtered.includes('[IP_ADDRESS_'), 'Should contain IP_ADDRESS placeholder')
+    console.log('#28 IPv4: OK')
+  }
+
+  // New patterns: Japanese postal code
+  {
+    const mapping = new MappingTable()
+    const filtered = filterText(`住所: ${TEST_PII.postalCode}`, { ...config, categories: ['POSTAL_CODE'] }, mapping)
+    assert.ok(!filtered.includes('100-0001'), 'Postal code should be masked')
+    assert.ok(filtered.includes('[POSTAL_CODE_'), 'Should contain POSTAL_CODE placeholder')
+    console.log('#9 POSTAL_CODE (〒): OK')
+  }
+
+  console.log('Bug Regressions PASSED')
 }
 
 // ============================================================
@@ -351,6 +444,7 @@ const runProxy = process.argv.includes('--proxy')
 try {
   testFilterON()
   testFilterOFF()
+  testBugRegressions()
 
   if (runProxy) {
     await testActualProxy()

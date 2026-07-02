@@ -59,6 +59,29 @@ const PATTERNS: readonly PatternDef[] = [
     pattern: /(?:Author|Committer):\s+(.+?)\s+<[^>]+>/g,
     captureGroup: 1,
   },
+  {
+    category: 'SSN',
+    pattern: /\b\d{3}-\d{2}-\d{4}\b/g,
+  },
+  {
+    category: 'IP_ADDRESS',
+    pattern:
+      /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+  },
+  {
+    category: 'IP_ADDRESS',
+    pattern:
+      /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g,
+  },
+  {
+    category: 'POSTAL_CODE',
+    pattern: /〒\d{3}-\d{4}/g,
+  },
+  {
+    category: 'POSTAL_CODE',
+    pattern: /\b\d{3}-\d{4}(?=\s*(?:$|[^\d]))/g,
+    validate: (match: string) => !/^\d{3}-\d{2}-\d{4}$/.test(match),
+  },
 ]
 
 export function detectDictionaryPII(
@@ -144,14 +167,27 @@ export function applyReplacements(
   matches: readonly PIIMatch[],
   register: (original: string, category: PIICategory) => string,
 ): string {
+  // Greedy interval scheduling: sort by start asc, then length desc to prefer longer spans.
+  // Non-overlapping winners are then applied right-to-left to preserve string positions.
+  const sorted = [...matches].sort(
+    (a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start),
+  )
+
+  const winners: PIIMatch[] = []
+  let lastEnd = -1
+  for (const match of sorted) {
+    if (match.start >= lastEnd) {
+      winners.push(match)
+      lastEnd = match.end
+    }
+    // skip shorter overlapping matches
+  }
+
+  // Apply right-to-left so earlier positions stay valid
+  winners.sort((a, b) => b.start - a.start)
+
   let result = text
-  const usedRange = new Set<string>()
-
-  for (const match of matches) {
-    const rangeKey = `${match.start}:${match.end}`
-    if (usedRange.has(rangeKey)) continue
-    usedRange.add(rangeKey)
-
+  for (const match of winners) {
     const placeholder = register(match.text, match.category)
     result = result.slice(0, match.start) + placeholder + result.slice(match.end)
   }
