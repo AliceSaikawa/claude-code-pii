@@ -1,12 +1,17 @@
 import type { MappingTable } from './mappingTable.js'
 
 const PLACEHOLDER_PATTERN = /^\[[A-Z_]+_\d+\]$/
-const MAX_PENDING = 25
+const MIN_PENDING_BUFFER = 32
 
 class TextDeltaRestorer {
   private pending = ''
 
   constructor(private readonly mappingTable: MappingTable) {}
+
+  private getMaxPendingLength(): number {
+    // Keep enough buffered text to avoid splitting long custom placeholders.
+    return Math.max(MIN_PENDING_BUFFER, this.mappingTable.getLongestPlaceholderLength())
+  }
 
   process(text: string): string {
     this.pending += text
@@ -25,7 +30,7 @@ class TextDeltaRestorer {
 
       const closeIdx = this.pending.indexOf(']')
       if (closeIdx === -1) {
-        if (this.pending.length > MAX_PENDING) {
+        if (this.pending.length > this.getMaxPendingLength()) {
           output += this.pending[0]
           this.pending = this.pending.slice(1)
           continue

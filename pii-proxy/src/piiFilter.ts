@@ -8,9 +8,11 @@ import type { PIICategory, PIIFilterConfig } from './types.js'
 export class PIIFilter {
   private readonly mappingTable = new MappingTable()
   private readonly config: PIIFilterConfig
+  private readonly allowlist: ReadonlySet<string>
 
   constructor(config = loadPIIConfig()) {
     this.config = config
+    this.allowlist = new Set(config.allowlist)
   }
 
   isEnabled(): boolean {
@@ -50,8 +52,8 @@ export class PIIFilter {
     this.mappingTable.clear()
   }
 
-
-  private register(original: string, category: PIICategory): string {
+  private registerMaskedValue(original: string, category: PIICategory): string {
+    if (this.allowlist.has(original)) return original
     return this.mappingTable.register(original, category)
   }
 
@@ -139,10 +141,10 @@ export class PIIFilter {
       this.config.categories,
       this.config.dictionary,
     )
-    filtered = applyReplacements(filtered, dictionaryMatches, this.register.bind(this))
+    filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedValue.bind(this))
 
     const regexMatches = detectRegexPII(filtered, this.config.categories, this.config.customPatterns)
-    filtered = applyReplacements(filtered, regexMatches, this.register.bind(this))
+    filtered = applyReplacements(filtered, regexMatches, this.registerMaskedValue.bind(this))
 
     if (this.config.ollamaEnabled && useOllama) {
       const ollamaMatches = await detectOllamaPII(
@@ -153,8 +155,7 @@ export class PIIFilter {
       )
 
       if (ollamaMatches.length > 0) {
-        const sorted = [...ollamaMatches].sort((a, b) => b.start - a.start)
-        filtered = applyReplacements(filtered, sorted, this.register.bind(this))
+        filtered = applyReplacements(filtered, ollamaMatches, this.registerMaskedValue.bind(this))
       }
     }
 
