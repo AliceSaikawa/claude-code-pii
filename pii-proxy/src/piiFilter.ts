@@ -1,6 +1,7 @@
 import { loadPIIConfig } from './config.js'
 import { MappingTable } from './mappingTable.js'
 import { detectOllamaPII } from './ollamaFilter.js'
+import { OpenAIStreamRestorer } from './openaiStreamRestorer.js'
 import { applyReplacements, detectDictionaryPII, detectRegexPII } from './regexFilter.js'
 import { StreamRestorer } from './streamRestorer.js'
 import type { PIICategory, PIIFilterConfig } from './types.js'
@@ -21,6 +22,10 @@ export class PIIFilter {
 
   createStreamRestorer(): StreamRestorer {
     return new StreamRestorer(this.mappingTable)
+  }
+
+  createOpenAIStreamRestorer(): OpenAIStreamRestorer {
+    return new OpenAIStreamRestorer(this.mappingTable)
   }
 
   async filterRequestBody(requestBody: Record<string, unknown>): Promise<Record<string, unknown>> {

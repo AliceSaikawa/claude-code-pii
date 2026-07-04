@@ -7,15 +7,25 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { execFileSync } from 'node:child_process'
 
 // Scenarios 1 & 2: inline filter logic (no server import to avoid port binding)
 // Scenario 3: HTTP requests to already-running proxy
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { request } from 'node:http'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const CONFIG_PATH = join(homedir(), '.claude', 'pii-filter.json')
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
+const ESBUILD_BIN = join(
+  SCRIPT_DIR,
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'esbuild.cmd' : 'esbuild',
+)
+let actualModuleCachePromise
 
 function loadConfig() {
   try {
@@ -29,6 +39,58 @@ function loadConfig() {
       ollamaEnabled: false,
     }
   }
+}
+
+async function loadActualModules() {
+  if (!actualModuleCachePromise) {
+    actualModuleCachePromise = (async () => {
+      const bundleDir = mkdtempSync(join(tmpdir(), 'pii-proxy-test-'))
+      const entries = [
+        ['provider.ts', 'provider.mjs'],
+        ['streamRestorer.ts', 'streamRestorer.mjs'],
+        ['openaiStreamRestorer.ts', 'openaiStreamRestorer.mjs'],
+      ]
+
+      try {
+        for (const [entryPoint, outFile] of entries) {
+          execFileSync(
+            ESBUILD_BIN,
+            [
+              join(SCRIPT_DIR, 'src', entryPoint),
+              '--bundle',
+              '--platform=node',
+              '--format=esm',
+              `--outfile=${join(bundleDir, outFile)}`,
+            ],
+            { cwd: SCRIPT_DIR, stdio: 'pipe' },
+          )
+        }
+
+        const [provider, anthropicStream, openaiStream] = await Promise.all([
+          import(pathToFileURL(join(bundleDir, 'provider.mjs')).href),
+          import(pathToFileURL(join(bundleDir, 'streamRestorer.mjs')).href),
+          import(pathToFileURL(join(bundleDir, 'openaiStreamRestorer.mjs')).href),
+        ])
+
+        return { provider, anthropicStream, openaiStream, bundleDir }
+      } catch (error) {
+        rmSync(bundleDir, { recursive: true, force: true })
+        throw error
+      }
+    })()
+  }
+
+  return actualModuleCachePromise
+}
+
+function cleanupActualModules() {
+  if (!actualModuleCachePromise) return
+
+  actualModuleCachePromise
+    .then(({ bundleDir }) => {
+      rmSync(bundleDir, { recursive: true, force: true })
+    })
+    .catch(() => {})
 }
 
 // --- Inline MappingTable ---
@@ -180,6 +242,18 @@ class SessionFilterStore {
       this.#bySocket.set(socket, new MappingTable())
     }
     return this.#bySocket.get(socket)
+  }
+}
+
+function createMappingTableMock(replacements) {
+  const placeholders = Object.keys(replacements)
+  return {
+    resolve(placeholder) {
+      return replacements[placeholder]
+    },
+    getLongestPlaceholderLength() {
+      return placeholders.reduce((longest, placeholder) => Math.max(longest, placeholder.length), 0)
+    },
   }
 }
 
@@ -344,6 +418,99 @@ function testBugRegressions() {
   console.log('Bug Regressions PASSED')
 }
 
+async function testProviderRouting() {
+  console.log('\n=== Provider Routing ===')
+
+  const { provider } = await loadActualModules()
+  const { getRequestPath, resolveProvider, shouldFilterMessagesPath } = provider
+
+  assert.equal(getRequestPath({ url: '/v1/chat/completions?stream=true' }), '/v1/chat/completions')
+
+  assert.equal(
+    resolveProvider({ url: '/v1/messages', headers: {} }).kind,
+    'anthropic',
+    '#2/#4: /v1/messages should route to Anthropic',
+  )
+  assert.equal(
+    resolveProvider({ url: '/v1/chat/completions', headers: {} }).kind,
+    'openai',
+    '#2/#4: /v1/chat/completions should route to OpenAI',
+  )
+  assert.equal(
+    resolveProvider({ url: '/v1/models', headers: { 'x-provider': 'openai' } }).kind,
+    'openai',
+    '#2/#4: x-provider=openai should steer generic pass-through routes',
+  )
+
+  assert.equal(
+    shouldFilterMessagesPath({ method: 'POST', url: '/v1/messages', headers: {} }),
+    true,
+    '#2: Anthropic messages route should be filtered',
+  )
+  assert.equal(
+    shouldFilterMessagesPath({ method: 'POST', url: '/v1/chat/completions', headers: {} }),
+    true,
+    '#2: OpenAI chat completions route should be filtered',
+  )
+  assert.equal(
+    shouldFilterMessagesPath({ method: 'GET', url: '/v1/chat/completions', headers: {} }),
+    false,
+    '#2: non-POST requests should pass through untouched',
+  )
+
+  console.log('#2/#4 Provider routing: OK')
+}
+
+async function testStreamRestorers() {
+  console.log('\n=== Stream Restorers ===')
+
+  const { anthropicStream, openaiStream } = await loadActualModules()
+  const anthropicMapping = createMappingTableMock({ '[EMAIL_1]': 'user@example.com' })
+  const openaiMapping = createMappingTableMock({ '[NAME_1]': '山田太郎' })
+
+  {
+    const restorer = new anthropicStream.StreamRestorer(anthropicMapping)
+    const output =
+      restorer.processChunk(
+        [
+          'event: content_block_delta',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello [EM"}}',
+          '',
+          'event: content_block_delta',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"AIL_1]"}}',
+          '',
+          'event: message_stop',
+          'data: {"type":"message_stop"}',
+          '',
+        ].join('\n'),
+      ) + restorer.flush()
+
+    assert.ok(output.includes('"text":"Hello "'), '#3: Anthropic stream should preserve plain text before a placeholder')
+    assert.ok(output.includes('"text":"user@example.com"'), '#3: Anthropic stream should restore split placeholders')
+  }
+
+  {
+    const restorer = new openaiStream.OpenAIStreamRestorer(openaiMapping)
+    const output =
+      restorer.processChunk(
+        [
+          'data: {"choices":[{"index":0,"delta":{"content":"こんにちは、[NA"}}]}',
+          '',
+          'data: {"choices":[{"index":0,"delta":{"content":"ME_1]さん"}}]}',
+          '',
+          'data: [DONE]',
+          '',
+        ].join('\n'),
+      ) + restorer.flush()
+
+    assert.ok(output.includes('"content":"こんにちは、"'), '#3: OpenAI stream should emit text before an incomplete placeholder')
+    assert.ok(output.includes('"content":"山田太郎さん"'), '#3: OpenAI stream should restore split placeholders')
+    assert.ok(output.trimEnd().endsWith('data: [DONE]'), '#3: OpenAI stream should keep the terminal DONE marker')
+  }
+
+  console.log('#3 Stream restoration: OK')
+}
+
 // ============================================================
 // Scenario 2: Filter OFF
 // ============================================================
@@ -416,6 +583,29 @@ async function testActualProxy() {
   assert.ok(parsed !== undefined, 'Proxy should return a response')
   console.log('Proxy round-trip verified (upstream returned response)')
 
+  console.log('Sending OpenAI-style request through proxy with PII (no API key)...')
+  const openAIResponse = await httpPost(
+    `${PROXY_URL}/v1/chat/completions`,
+    {
+      model: 'gpt-4.1-mini',
+      messages: [
+        {
+          role: 'user',
+          content: `私は山田太郎です。メールはyamada.taro@example.comです。09011112222に電話してください。`,
+        },
+      ],
+    },
+    {
+      authorization: 'Bearer sk-test-dummy-key-for-filtering-test',
+      'content-type': 'application/json',
+    },
+  )
+
+  const openAIParsed = JSON.parse(openAIResponse)
+  console.log('OpenAI upstream status:', openAIParsed.error?.type ?? 'ok')
+  assert.ok(openAIParsed !== undefined, 'OpenAI route should return a response')
+  console.log('OpenAI provider route verified')
+
   // Bonus: if API key is available, verify full round-trip with restoration
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (apiKey) {
@@ -486,6 +676,8 @@ try {
   testFilterON()
   testFilterOFF()
   testBugRegressions()
+  await testProviderRouting()
+  await testStreamRestorers()
 
   if (runProxy) {
     await testActualProxy()
@@ -497,5 +689,7 @@ try {
   console.log('\n All tests passed')
 } catch (err) {
   console.error('\n FAILED:', err.message)
-  process.exit(1)
+  process.exitCode = 1
+} finally {
+  cleanupActualModules()
 }
