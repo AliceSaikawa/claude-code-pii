@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'node:http'
 import type { Socket } from 'node:net'
+import { normalizeHeaderValue, readHeader } from './httpUtils.js'
 import { PIIFilter } from './piiFilter.js'
 
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000
@@ -11,28 +12,6 @@ type SessionEntry = {
   expiresAt: number
 }
 
-function normalizeHeaderValue(value: string | readonly string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const normalized = item.trim()
-      if (normalized) return normalized
-    }
-    return undefined
-  }
-
-  if (typeof value !== 'string') return undefined
-
-  const normalized = value.trim()
-  return normalized ? normalized : undefined
-}
-
-function readHeader(req: IncomingMessage, headerNames: readonly string[]): string | undefined {
-  for (const headerName of headerNames) {
-    const normalized = normalizeHeaderValue(req.headers[headerName])
-    if (normalized) return normalized
-  }
-  return undefined
-}
 
 function shouldResetSession(req: IncomingMessage): boolean {
   const resetValue = readHeader(req, SESSION_RESET_HEADERS)?.toLowerCase()

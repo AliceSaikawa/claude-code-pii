@@ -91,6 +91,7 @@ function handleControlRequest(req: IncomingMessage, res: ServerResponse): boolea
   }
 
   if (req.method === 'POST' && path === '/control/filter') {
+    // フィルタ再開 = passthrough解除 + 個別disable も全リセット
     resetControlState()
     writeControlStatus(res)
     return true

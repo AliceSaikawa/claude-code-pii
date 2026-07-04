@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'node:http'
+import { normalizeHeaderValue } from './httpUtils.js'
 
 export type ProviderKind = 'anthropic' | 'openai'
 
@@ -27,20 +28,6 @@ const PROVIDERS: Record<ProviderKind, ProviderConfig> = {
 const PATH_TO_PROVIDER: Record<string, ProviderKind> = {
   '/v1/messages': 'anthropic',
   '/v1/chat/completions': 'openai',
-}
-
-function normalizeHeaderValue(value: string | readonly string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const normalized = item.trim()
-      if (normalized) return normalized
-    }
-    return undefined
-  }
-
-  if (typeof value !== 'string') return undefined
-  const normalized = value.trim()
-  return normalized ? normalized : undefined
 }
 
 export function getRequestPath(req: IncomingMessage): string {
