@@ -7,7 +7,7 @@ type PatternDef = {
   readonly captureGroup?: number
 }
 
-function selectNonOverlappingMatches(matches: readonly PIIMatch[]): readonly PIIMatch[] {
+export function selectNonOverlappingMatches(matches: readonly PIIMatch[]): readonly PIIMatch[] {
   const sorted = [...matches].sort(
     (left, right) => left.start - right.start || (right.end - right.start) - (left.end - left.start),
   )

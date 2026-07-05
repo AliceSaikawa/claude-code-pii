@@ -38,3 +38,8 @@ export function loadPIIConfig(): PIIFilterConfig {
 export function resetPIIConfigCache(): void {
   loadedConfig = null
 }
+
+export function reloadPIIConfig(): PIIFilterConfig {
+  resetPIIConfigCache()
+  return loadPIIConfig()
+}

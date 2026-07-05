@@ -64,7 +64,11 @@ Runtime controls:
 node pii-proxy/dist/cli.js status
 curl -X POST http://127.0.0.1:8787/control/passthrough
 curl -X POST http://127.0.0.1:8787/control/filter
+curl -X POST http://127.0.0.1:8787/control/reload
 curl -X POST http://127.0.0.1:8787/control/disable/PHONE
+curl -X POST http://127.0.0.1:8787/analyze \
+  -H 'content-type: application/json' \
+  -d '{"text":"Yamada Taro email is yamada@example.com"}'
 ```
 
 ## Limitations

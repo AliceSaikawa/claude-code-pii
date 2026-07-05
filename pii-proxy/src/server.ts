@@ -10,9 +10,10 @@ import {
   setPassthroughEnabled,
   togglePassthrough,
 } from './controlState.js'
-import { loadPIIConfig } from './config.js'
+import { loadPIIConfig, reloadPIIConfig } from './config.js'
 import { resolveProvider, shouldFilterMessagesPath } from './provider.js'
 import { SessionFilterStore } from './sessionFilterStore.js'
+import { PIIFilter } from './piiFilter.js'
 
 const DEFAULT_PORT = 8787
 const sessionFilters = new SessionFilterStore()
@@ -68,6 +69,13 @@ function writeControlStatus(res: ServerResponse): void {
   })
 }
 
+function reloadRuntimeConfig(): void {
+  reloadPIIConfig()
+  // Existing session filters keep their own config snapshots, so reload starts
+  // fresh sessions for requests after the config change.
+  sessionFilters.clear()
+}
+
 function getControlCategory(req: IncomingMessage, prefix: string): string | undefined {
   const path = req.url?.split('?')[0] ?? '/'
   if (!path.startsWith(prefix)) return undefined
@@ -93,6 +101,12 @@ function handleControlRequest(req: IncomingMessage, res: ServerResponse): boolea
   if (req.method === 'POST' && path === '/control/filter') {
     // フィルタ再開 = passthrough解除 + 個別disable も全リセット
     resetControlState()
+    writeControlStatus(res)
+    return true
+  }
+
+  if (req.method === 'POST' && path === '/control/reload') {
+    reloadRuntimeConfig()
     writeControlStatus(res)
     return true
   }
@@ -124,6 +138,30 @@ function handleControlRequest(req: IncomingMessage, res: ServerResponse): boolea
   }
 
   return false
+}
+
+async function handleAnalyze(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const rawBody = await readBody(req)
+
+  let parsedBody: Record<string, unknown>
+  try {
+    parsedBody = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>
+  } catch {
+    writeJson(res, 400, { error: 'Invalid JSON body' })
+    return
+  }
+
+  if (typeof parsedBody['text'] !== 'string') {
+    writeJson(res, 400, { error: 'Expected JSON body with a string "text" field' })
+    return
+  }
+
+  const filter = new PIIFilter()
+  const detections = await filter.analyzeText(parsedBody['text'], {
+    useOllama: parsedBody['useOllama'] === true,
+  })
+
+  writeJson(res, 200, { detections })
 }
 
 type StreamRestorerLike = {
@@ -286,6 +324,11 @@ const server = createServer(async (req, res) => {
       return
     }
 
+    if (req.method === 'POST' && req.url?.split('?')[0] === '/analyze') {
+      await handleAnalyze(req, res)
+      return
+    }
+
     if (shouldFilterMessagesPath(req)) {
       await handleMessages(req, res)
       return
@@ -310,6 +353,11 @@ process.on('SIGUSR1', () => {
   const status = togglePassthrough()
   const mode = status.passthroughEnabled ? 'passthrough' : 'filtering'
   process.stdout.write(`PII proxy control mode: ${mode}\n`)
+})
+
+process.on('SIGHUP', () => {
+  reloadRuntimeConfig()
+  process.stdout.write('PII proxy config reloaded\n')
 })
 
 process.on('SIGINT', () => {

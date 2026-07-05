@@ -47,6 +47,7 @@ async function loadActualModules() {
       const bundleDir = mkdtempSync(join(tmpdir(), 'pii-proxy-test-'))
       const entries = [
         ['controlState.ts', 'controlState.mjs'],
+        ['piiFilter.ts', 'piiFilter.mjs'],
         ['provider.ts', 'provider.mjs'],
         ['streamRestorer.ts', 'streamRestorer.mjs'],
         ['openaiStreamRestorer.ts', 'openaiStreamRestorer.mjs'],
@@ -67,14 +68,15 @@ async function loadActualModules() {
           )
         }
 
-        const [controlState, provider, anthropicStream, openaiStream] = await Promise.all([
+        const [controlState, piiFilter, provider, anthropicStream, openaiStream] = await Promise.all([
           import(pathToFileURL(join(bundleDir, 'controlState.mjs')).href),
+          import(pathToFileURL(join(bundleDir, 'piiFilter.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'provider.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'streamRestorer.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'openaiStreamRestorer.mjs')).href),
         ])
 
-        return { controlState, provider, anthropicStream, openaiStream, bundleDir }
+        return { controlState, piiFilter, provider, anthropicStream, openaiStream, bundleDir }
       } catch (error) {
         rmSync(bundleDir, { recursive: true, force: true })
         throw error
@@ -545,6 +547,36 @@ async function testControlState() {
   console.log('#13 Runtime control state: OK')
 }
 
+async function testDryRunAnalysis() {
+  console.log('\n=== Dry Run Analysis ===')
+
+  const { piiFilter } = await loadActualModules()
+  const config = {
+    ...loadConfig(),
+    enabled: true,
+    categories: ['EMAIL', 'PHONE', 'NAME'],
+    dictionary: [{ text: '山田太郎', category: 'NAME' }],
+    allowlist: ['public@example.com'],
+    ollamaEnabled: false,
+  }
+
+  const filter = new piiFilter.PIIFilter(config)
+  const detections = await filter.analyzeText(
+    '山田太郎のメールはprivate@example.comです。公開先はpublic@example.com、電話は09011112222です。',
+  )
+
+  assert.deepEqual(
+    detections.map((item) => item.category),
+    ['NAME', 'EMAIL', 'PHONE'],
+    '#23: dry-run should report configured detections without masking text',
+  )
+  assert.ok(
+    detections.every((item) => item.text !== 'public@example.com'),
+    '#23: allowlisted values should not be reported as mask candidates',
+  )
+  console.log('#23 Dry-run analysis: OK')
+}
+
 // ============================================================
 // Scenario 2: Filter OFF
 // ============================================================
@@ -611,7 +643,27 @@ async function testActualProxy() {
     enabledPhoneStatus.activeCategories.includes('PHONE'),
     'Enable category endpoint should restore PHONE to active categories',
   )
+
+  const reloadStatus = JSON.parse(await httpPost(`${PROXY_URL}/control/reload`, {}, {}))
+  assert.equal(reloadStatus.filterEnabled, true, 'Reload endpoint should return current filter status')
   console.log('Control endpoints: OK')
+
+  const analysis = JSON.parse(
+    await httpPost(
+      `${PROXY_URL}/analyze`,
+      { text: '連絡先は yamada.taro@example.com、電話は 09011112222 です。' },
+      { 'content-type': 'application/json' },
+    ),
+  )
+  assert.ok(
+    analysis.detections.some((item) => item.category === 'EMAIL'),
+    'Analyze endpoint should report email detections',
+  )
+  assert.ok(
+    analysis.detections.some((item) => item.category === 'PHONE'),
+    'Analyze endpoint should report phone detections',
+  )
+  console.log('Analyze endpoint: OK')
 
   // Send a message containing PII through the proxy (no API key needed for filtering verification)
   const requestBody = {
@@ -737,6 +789,7 @@ try {
   await testProviderRouting()
   await testStreamRestorers()
   await testControlState()
+  await testDryRunAnalysis()
 
   if (runProxy) {
     await testActualProxy()

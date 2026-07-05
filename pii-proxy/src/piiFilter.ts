@@ -3,9 +3,14 @@ import { getActiveCategories, isPassthroughEnabled } from './controlState.js'
 import { MappingTable } from './mappingTable.js'
 import { detectOllamaPII } from './ollamaFilter.js'
 import { OpenAIStreamRestorer } from './openaiStreamRestorer.js'
-import { applyReplacements, detectDictionaryPII, detectRegexPII } from './regexFilter.js'
+import {
+  applyReplacements,
+  detectDictionaryPII,
+  detectRegexPII,
+  selectNonOverlappingMatches,
+} from './regexFilter.js'
 import { StreamRestorer } from './streamRestorer.js'
-import type { PIICategory, PIIFilterConfig } from './types.js'
+import type { PIICategory, PIIFilterConfig, PIIMatch } from './types.js'
 
 export class PIIFilter {
   private readonly mappingTable = new MappingTable()
@@ -52,6 +57,33 @@ export class PIIFilter {
   restoreResponseBody<T>(payload: T): T {
     if (!this.isEnabled()) return payload
     return this.restoreRecursive(payload) as T
+  }
+
+  async analyzeText(text: string, options: { readonly useOllama?: boolean } = {}): Promise<readonly PIIMatch[]> {
+    if (!text.trim()) return []
+
+    const categories = getActiveCategories(this.config.categories)
+    if (categories.length === 0) return []
+
+    const matches: PIIMatch[] = [
+      ...detectDictionaryPII(text, categories, this.config.dictionary),
+      ...detectRegexPII(text, categories, this.config.customPatterns),
+    ]
+
+    if (options.useOllama && this.config.ollamaEnabled) {
+      matches.push(
+        ...(await detectOllamaPII(
+          [{ index: 0, text }],
+          this.config.ollamaEndpoint,
+          this.config.ollamaModel,
+          categories,
+        )),
+      )
+    }
+
+    return selectNonOverlappingMatches(matches)
+      .filter((match) => !this.allowlist.has(match.text))
+      .sort((left, right) => left.start - right.start)
   }
 
   reset(): void {
