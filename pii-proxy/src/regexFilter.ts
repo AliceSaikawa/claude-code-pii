@@ -1,4 +1,4 @@
-import type { DictionaryEntry, PIICategory, PIIMatch } from './types.js'
+import type { CustomPatternEntry, DictionaryEntry, PIICategory, PIIMatch } from './types.js'
 
 type PatternDef = {
   readonly category: PIICategory
@@ -132,7 +132,7 @@ export function detectDictionaryPII(
 export function detectRegexPII(
   text: string,
   enabledCategories: readonly PIICategory[],
-  customPatterns: readonly { readonly name: string; readonly pattern: string }[] = [],
+  customPatterns: readonly CustomPatternEntry[] = [],
 ): readonly PIIMatch[] {
   const categorySet = new Set(enabledCategories)
   const matches: PIIMatch[] = []
@@ -161,13 +161,21 @@ export function detectRegexPII(
   }
 
   for (const custom of customPatterns) {
+    const category = custom.category ?? custom.name
+    if (!categorySet.has(category)) continue
+
     try {
       const regex = new RegExp(custom.pattern, 'g')
       let m: RegExpExecArray | null
       while ((m = regex.exec(text)) !== null) {
+        if (!m[0]) {
+          regex.lastIndex += 1
+          continue
+        }
+
         matches.push({
           text: m[0],
-          category: 'NAME',
+          category,
           start: m.index,
           end: m.index + m[0].length,
         })

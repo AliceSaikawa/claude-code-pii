@@ -36,6 +36,7 @@ function loadConfig() {
       categories: ['EMAIL', 'PHONE', 'NAME', 'ORG', 'ADDRESS', 'API_KEY', 'CREDIT_CARD', 'MY_NUMBER', 'SCHOOL', 'SSN', 'IP_ADDRESS', 'POSTAL_CODE'],
       dictionary: [],
       allowlist: [],
+      customCategories: [],
       ollamaEnabled: false,
     }
   }
@@ -47,6 +48,7 @@ async function loadActualModules() {
       const bundleDir = mkdtempSync(join(tmpdir(), 'pii-proxy-test-'))
       const entries = [
         ['controlState.ts', 'controlState.mjs'],
+        ['piiFilter.ts', 'piiFilter.mjs'],
         ['provider.ts', 'provider.mjs'],
         ['streamRestorer.ts', 'streamRestorer.mjs'],
         ['openaiStreamRestorer.ts', 'openaiStreamRestorer.mjs'],
@@ -67,14 +69,15 @@ async function loadActualModules() {
           )
         }
 
-        const [controlState, provider, anthropicStream, openaiStream] = await Promise.all([
+        const [controlState, piiFilter, provider, anthropicStream, openaiStream] = await Promise.all([
           import(pathToFileURL(join(bundleDir, 'controlState.mjs')).href),
+          import(pathToFileURL(join(bundleDir, 'piiFilter.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'provider.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'streamRestorer.mjs')).href),
           import(pathToFileURL(join(bundleDir, 'openaiStreamRestorer.mjs')).href),
         ])
 
-        return { controlState, provider, anthropicStream, openaiStream, bundleDir }
+        return { controlState, piiFilter, provider, anthropicStream, openaiStream, bundleDir }
       } catch (error) {
         rmSync(bundleDir, { recursive: true, force: true })
         throw error
@@ -545,6 +548,44 @@ async function testControlState() {
   console.log('#13 Runtime control state: OK')
 }
 
+async function testCustomFilters() {
+  console.log('\n=== Custom Filters ===')
+
+  const { piiFilter } = await loadActualModules()
+  const filter = new piiFilter.PIIFilter({
+    ...loadConfig(),
+    enabled: true,
+    categories: ['EMAIL'],
+    customPatterns: [
+      { name: 'LEGACY_SECRET', pattern: 'LEG-[0-9]{3}' },
+    ],
+    customCategories: [
+      {
+        name: 'PROJECT_CODE',
+        placeholder: '社外秘',
+        patterns: ['PRJ-[0-9]{4}'],
+        dictionary: ['Phoenix'],
+      },
+    ],
+    ollamaEnabled: false,
+  })
+
+  const original = '計画 Phoenix のコードは PRJ-1234、旧形式は LEG-999 です。'
+  const filteredBody = await filter.filterRequestBody({
+    messages: [{ role: 'user', content: original }],
+  })
+  const filtered = filteredBody.messages[0].content
+
+  assert.ok(filtered.includes('[社外秘_'), '#12: custom category should use custom placeholder text')
+  assert.ok(filtered.includes('[LEGACY_SECRET_'), '#12: legacy customPatterns name should become its category')
+  assert.ok(!filtered.includes('Phoenix'), '#12: custom category dictionary entries should be masked')
+  assert.ok(!filtered.includes('PRJ-1234'), '#12: custom category regex patterns should be masked')
+
+  const restored = filter.restoreResponseBody({ text: filtered })
+  assert.equal(restored.text, original, '#12: custom placeholders should restore correctly')
+  console.log('#12 Custom filters: OK')
+}
+
 // ============================================================
 // Scenario 2: Filter OFF
 // ============================================================
@@ -737,6 +778,7 @@ try {
   await testProviderRouting()
   await testStreamRestorers()
   await testControlState()
+  await testCustomFilters()
 
   if (runProxy) {
     await testActualProxy()

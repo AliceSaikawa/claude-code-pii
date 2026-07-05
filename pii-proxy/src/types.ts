@@ -14,7 +14,23 @@ export const PII_CATEGORIES = [
   'POSTAL_CODE',
 ] as const
 
-export type PIICategory = (typeof PII_CATEGORIES)[number]
+export type BuiltInPIICategory = (typeof PII_CATEGORIES)[number]
+export type PIICategory = BuiltInPIICategory | (string & {})
+
+export type CustomPatternEntry = {
+  readonly name: string
+  readonly pattern: string
+  readonly category?: PIICategory
+}
+
+export type CustomCategoryConfig = {
+  readonly name: PIICategory
+  readonly label?: string
+  readonly placeholder?: string
+  readonly enabled?: boolean
+  readonly patterns?: readonly string[]
+  readonly dictionary?: readonly string[]
+}
 
 export type PIIMatch = {
   readonly text: string
@@ -34,7 +50,8 @@ export type PIIFilterConfig = {
   readonly ollamaEndpoint: string
   readonly ollamaModel: string
   readonly ollamaEnabled: boolean
-  readonly customPatterns: readonly { readonly name: string; readonly pattern: string }[]
+  readonly customPatterns: readonly CustomPatternEntry[]
+  readonly customCategories: readonly CustomCategoryConfig[]
   readonly dictionary: readonly DictionaryEntry[]
   readonly allowlist: readonly string[]
 }
@@ -59,6 +76,7 @@ export const DEFAULT_CONFIG: PIIFilterConfig = {
   ollamaModel: 'gemma3:4b',
   ollamaEnabled: true,
   customPatterns: [],
+  customCategories: [],
   dictionary: [],
   allowlist: [],
 }

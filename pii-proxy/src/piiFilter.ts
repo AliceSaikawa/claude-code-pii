@@ -5,7 +5,39 @@ import { detectOllamaPII } from './ollamaFilter.js'
 import { OpenAIStreamRestorer } from './openaiStreamRestorer.js'
 import { applyReplacements, detectDictionaryPII, detectRegexPII } from './regexFilter.js'
 import { StreamRestorer } from './streamRestorer.js'
-import type { PIICategory, PIIFilterConfig } from './types.js'
+import type { CustomPatternEntry, DictionaryEntry, PIICategory, PIIFilterConfig } from './types.js'
+
+function getCustomCategoryNames(config: PIIFilterConfig): readonly PIICategory[] {
+  return config.customCategories
+    .filter((category) => category.enabled !== false)
+    .map((category) => category.name)
+}
+
+function getConfiguredCategories(config: PIIFilterConfig): readonly PIICategory[] {
+  const customPatternCategories = config.customPatterns.map((pattern) => pattern.category ?? pattern.name)
+  return [...new Set([...config.categories, ...getCustomCategoryNames(config), ...customPatternCategories])]
+}
+
+function getCustomDictionary(config: PIIFilterConfig): readonly DictionaryEntry[] {
+  return config.customCategories.flatMap((category) => {
+    if (category.enabled === false) return []
+    return (category.dictionary ?? []).map((text) => ({ text, category: category.name }))
+  })
+}
+
+function getCustomPatterns(config: PIIFilterConfig): readonly CustomPatternEntry[] {
+  return [
+    ...config.customPatterns,
+    ...config.customCategories.flatMap((category) => {
+      if (category.enabled === false) return []
+      return (category.patterns ?? []).map((pattern, index) => ({
+        name: `${category.name}_${index + 1}`,
+        category: category.name,
+        pattern,
+      }))
+    }),
+  ]
+}
 
 export class PIIFilter {
   private readonly mappingTable = new MappingTable()
@@ -60,7 +92,13 @@ export class PIIFilter {
 
   private registerMaskedValue(original: string, category: PIICategory): string {
     if (this.allowlist.has(original)) return original
-    return this.mappingTable.register(original, category)
+
+    const customCategory = this.config.customCategories.find((item) => item.name === category)
+    return this.mappingTable.register(
+      original,
+      category,
+      customCategory?.placeholder ?? customCategory?.label ?? category,
+    )
   }
 
   private async filterMessages(messages: readonly unknown[]): Promise<unknown[]> {
@@ -141,17 +179,17 @@ export class PIIFilter {
     if (!text.trim()) return text
 
     let filtered = text
-    const categories = getActiveCategories(this.config.categories)
+    const categories = getActiveCategories(getConfiguredCategories(this.config))
     if (categories.length === 0) return filtered
 
     const dictionaryMatches = detectDictionaryPII(
       filtered,
       categories,
-      this.config.dictionary,
+      [...this.config.dictionary, ...getCustomDictionary(this.config)],
     )
     filtered = applyReplacements(filtered, dictionaryMatches, this.registerMaskedValue.bind(this))
 
-    const regexMatches = detectRegexPII(filtered, categories, this.config.customPatterns)
+    const regexMatches = detectRegexPII(filtered, categories, getCustomPatterns(this.config))
     filtered = applyReplacements(filtered, regexMatches, this.registerMaskedValue.bind(this))
 
     if (this.config.ollamaEnabled && useOllama) {

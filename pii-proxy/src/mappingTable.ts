@@ -7,16 +7,17 @@ function escapeRegExp(input: string): string {
 export class MappingTable {
   private readonly originalToPlaceholder = new Map<string, string>()
   private readonly placeholderToOriginal = new Map<string, string>()
-  private readonly counters = new Map<PIICategory, number>()
+  private readonly counters = new Map<string, number>()
 
-  register(original: string, category: PIICategory): string {
+  register(original: string, category: PIICategory, placeholderPrefix = category): string {
     const existing = this.originalToPlaceholder.get(original)
     if (existing) return existing
 
-    const count = (this.counters.get(category) ?? 0) + 1
-    this.counters.set(category, count)
+    const counterKey = String(category)
+    const count = (this.counters.get(counterKey) ?? 0) + 1
+    this.counters.set(counterKey, count)
 
-    const placeholder = `[${category}_${count}]`
+    const placeholder = `[${placeholderPrefix}_${count}]`
     this.originalToPlaceholder.set(original, placeholder)
     this.placeholderToOriginal.set(placeholder, original)
 

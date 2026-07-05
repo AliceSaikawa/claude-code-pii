@@ -13,6 +13,7 @@ import {
 import { loadPIIConfig } from './config.js'
 import { resolveProvider, shouldFilterMessagesPath } from './provider.js'
 import { SessionFilterStore } from './sessionFilterStore.js'
+import type { PIICategory, PIIFilterConfig } from './types.js'
 
 const DEFAULT_PORT = 8787
 const sessionFilters = new SessionFilterStore()
@@ -58,13 +59,29 @@ function writeJson(res: ServerResponse, statusCode: number, payload: unknown): v
   res.end(JSON.stringify(payload))
 }
 
+function getConfiguredCategories(config: PIIFilterConfig): readonly PIICategory[] {
+  const customCategories = config.customCategories
+    .filter((category) => category.enabled !== false)
+    .map((category) => category.name)
+  const customPatternCategories = config.customPatterns.map((pattern) => pattern.category ?? pattern.name)
+  return [...new Set([...config.categories, ...customCategories, ...customPatternCategories])]
+}
+
+function isConfiguredCategory(category: string, config: PIIFilterConfig): category is PIICategory {
+  return (
+    isKnownPIICategory(category) ||
+    config.customCategories.some((item) => item.name === category) ||
+    config.customPatterns.some((item) => (item.category ?? item.name) === category)
+  )
+}
+
 function writeControlStatus(res: ServerResponse): void {
   const status = getControlStatus()
   const config = loadPIIConfig()
   writeJson(res, 200, {
     ...status,
     filterEnabled: config.enabled && !status.passthroughEnabled,
-    activeCategories: getActiveCategories(config.categories),
+    activeCategories: getActiveCategories(getConfiguredCategories(config)),
   })
 }
 
@@ -100,7 +117,7 @@ function handleControlRequest(req: IncomingMessage, res: ServerResponse): boolea
   if (req.method === 'POST') {
     const disabledCategory = getControlCategory(req, '/control/disable/')
     if (disabledCategory) {
-      if (!isKnownPIICategory(disabledCategory)) {
+      if (!isConfiguredCategory(disabledCategory, loadPIIConfig())) {
         writeJson(res, 400, { error: `Unknown PII category: ${disabledCategory}` })
         return true
       }
@@ -112,7 +129,7 @@ function handleControlRequest(req: IncomingMessage, res: ServerResponse): boolea
 
     const enabledCategory = getControlCategory(req, '/control/enable/')
     if (enabledCategory) {
-      if (!isKnownPIICategory(enabledCategory)) {
+      if (!isConfiguredCategory(enabledCategory, loadPIIConfig())) {
         writeJson(res, 400, { error: `Unknown PII category: ${enabledCategory}` })
         return true
       }

@@ -52,7 +52,15 @@ ollama pull gemma3:4b
   "ollamaModel": "gemma3:4b",
   "ollamaEndpoint": "http://localhost:11434",
   "ollamaEnabled": true,
-  "customPatterns": []
+  "customPatterns": [],
+  "customCategories": [
+    {
+      "name": "PROJECT_CODE",
+      "placeholder": "SECRET",
+      "patterns": ["PRJ-\\d{4}"],
+      "dictionary": ["Phoenix"]
+    }
+  ]
 }
 ```
 
