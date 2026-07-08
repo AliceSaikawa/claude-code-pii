@@ -7,3 +7,4 @@ src/
 !pii-proxy/src/**
 stubs/
 types/
+deletion-candidates*.md
